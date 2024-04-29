@@ -56,10 +56,11 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
         global lecture_url
 
         async def callback(page):
-            url = page.url
-            if "KcuLod" in url:
-                lecture_url.append(page.url)
-            await page.close()
+            new_url = page.url
+            print(new_url)
+            if "KcuLod" in new_url:
+                lecture_url.append(new_url)
+
 
         asyncio.ensure_future(callback(page))
 
@@ -83,10 +84,12 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
     for code in code_list:
         url = f"https://www.kcu.ac/2009/mycampus/student/lecture/Plan/lectureplan.asp?termCode={code[0]}&courseCode={code[1]}"
         await login_page.goto(url, wait_until="domcontentloaded")
-        element = await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
-        await asyncio.sleep(30)
-        print(lecture_url)
+        await asyncio.sleep(3)
+        await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
+        await asyncio.sleep(3)
+    print(lecture_url)
     """
+    
     qm_elements = await login_page.query_selector_all('img[src="/MyClass/student/sukang/images/qm.gif"]')
     for element in qm_elements:
         # 각 qm.gif 이미지를 포함하는 <a> 요소의 부모의 부모인 <a> 요소의 자바스크립트를 실행하여 팝업을 엽니다.
