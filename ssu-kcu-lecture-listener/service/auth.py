@@ -1,7 +1,8 @@
 from playwright.sync_api import sync_playwright
 from http.cookies import SimpleCookie
-
+import re
 import asyncio
+from dbUtil import DbUtil
 
 lecture_url = []
 
@@ -61,7 +62,6 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
             if "KcuLod" in new_url:
                 lecture_url.append(new_url)
 
-
         asyncio.ensure_future(callback(page))
 
     code_set = set()
@@ -87,7 +87,30 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
         await asyncio.sleep(3)
         await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
         await asyncio.sleep(3)
-    print(lecture_url)
+    for url in lecture_url:
+        user_id, semester_info, subject_info, subject_code = extract_info(url)
+        print("URL:", url)
+        print("학기 정보:", semester_info)
+        print("과목 정보:", subject_info)
+        print("과목 코드:", subject_code)
+        if user_id and semester_info and semester_info and subject_code:
+            db = DbUtil()
+            query = f"""
+                        INSERT INTO LECTURE_INFO (
+                            user_id, 
+                            term, 
+                            subject_info, 
+                            subject_code
+                        ) VALUES (
+                            ?, 
+                            ?, 
+                            ?, 
+                            ?
+                        )
+            """
+            db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code))
+
+        print()
     """
     
     qm_elements = await login_page.query_selector_all('img[src="/MyClass/student/sukang/images/qm.gif"]')
@@ -104,3 +127,17 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
         "https://www.kcu.ac/2009/mycampus/student/lecture/Plan/lectureplan.asp?termCode=20241&courseCode=XE402201"
         await asyncio.sleep(300)
     """
+
+
+def extract_info(url):
+    # URL에서 학기 정보, 과목 정보, 과목 코드, user_id를 추출합니다.
+    pattern = r'KcuLod/(\d+)/(\d+)/([A-Z0-9]+)/.*?userid=(\d+)'
+    match = re.search(pattern, url)
+    if match:
+        semester_info = match.group(1)
+        subject_info = match.group(2)
+        subject_code = match.group(3)
+        user_id = match.group(4)
+        return user_id, semester_info, subject_info, subject_code
+    else:
+        return None, None, None, None

@@ -9,6 +9,7 @@ from service.auth import authorization, LoginProps
 
 import pyautogui
 import tkinter as tk
+from service.dbUtil import DbUtil
 
 import sqlite3
 
@@ -123,4 +124,14 @@ async def bootstrap():
 
 
 if __name__ == "__main__":
+    db = DbUtil()
+
+    db.exec('''CREATE TABLE IF NOT EXISTS LECTURE_INFO (
+                        id INTEGER PRIMARY KEY,
+                        user_id TEXT,
+                        term TEXT,
+                        subject_info TEXT,
+                        subject_code TEXT
+                    )''')
+    db.close()
     asyncio.run(bootstrap())

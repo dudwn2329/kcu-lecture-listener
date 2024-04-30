@@ -34,3 +34,6 @@ class DbUtil:
         cur.close()
         self.conn.commit()
         return result
+
+    def close(self):
+        self.conn.close()
