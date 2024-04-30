@@ -35,5 +35,14 @@ class DbUtil:
         self.conn.commit()
         return result
 
+    def getRows(self, query, params=None):
+        cursor = self.getCursor()
+        if params is not None:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        rows = cursor.fetchall()
+        return rows
+
     def close(self):
         self.conn.close()

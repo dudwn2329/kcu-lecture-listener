@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from playwright.sync_api import sync_playwright
 from http.cookies import SimpleCookie
 import re
@@ -21,9 +23,11 @@ class Authorization:
         self.token = token
 
 
-async def authorization(context, login_props: LoginProps) -> Authorization:
+async def authorization(context, login_props: LoginProps):
     global lecture_url
+    db = DbUtil()
     login_page = await context.new_page()
+    results = []
     await login_page.goto("https://www.kcu.ac/portal/default.asp", wait_until="domcontentloaded")
     # 로그인이동
     await login_page.evaluate('''() => {
@@ -58,17 +62,24 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
 
         async def callback(page):
             new_url = page.url
-            print(new_url)
             if "KcuLod" in new_url:
                 lecture_url.append(new_url)
 
         asyncio.ensure_future(callback(page))
 
+    unattended_weeks = defaultdict(list)
     code_set = set()
     qm_elements = await login_page.query_selector_all('img[src="/MyClass/student/sukang/images/qm.gif"]')
     for element in qm_elements:
         # 각 요소의 부모인 <a> 요소의 href 속성을 가져옵니다.
         href = await element.evaluate('(e) => e.closest("a").getAttribute("href")')
+
+        # 주차 정보를 포함하는 상위 요소로 이동
+        column_index = await element.evaluate('''el => {
+                        const cell = el.closest("td");
+                        const row = cell.parentElement;
+                        return Array.from(row.children).indexOf(cell) - 1;
+                    }''')
 
         # href 속성에서 termCode와 courseCode를 추출합니다.
         termCode = href.split('termCode=')[1].split('&')[0]
@@ -76,25 +87,44 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
 
         print("termCode:", termCode)
         print("courseCode:", courseCode)
+
+        unattended_weeks[courseCode].append(column_index)
         code_set.add((termCode, courseCode))
     code_list = list(code_set)
+    print("과목코드와 미수강 주차")
+    print(unattended_weeks)
     print("Unique termCode and courseCode pairs:", code_list)
-    await asyncio.sleep(3)  # 결과 확인을 위해 잠시 대기합니다.
-    context.on("page", handle_new_page)
+
     for code in code_list:
-        url = f"https://www.kcu.ac/2009/mycampus/student/lecture/Plan/lectureplan.asp?termCode={code[0]}&courseCode={code[1]}"
-        await login_page.goto(url, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
-        await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
-        await asyncio.sleep(3)
+        query = f"""
+                SELECT TERM, SUBJECT_INFO,SUBJECT_CODE, USER_ID 
+                FROM LECTURE_INFO
+                WHERE 
+                    TERM = ? AND SUBJECT_CODE = ?
+            """
+        rows = db.getRows(query, code)
+        if rows:
+            for row in rows:
+                for week in unattended_weeks[row[2]]:
+                    attend_url = f'https://vod.kcu.or.kr/KcuLod/{row[0]}/{row[1]}/{row[2]}/{week}/index.html?userid={row[3]}'
+                    results.append(attend_url)
+                    print(attend_url)
+        else:
+            context.on("page", handle_new_page)
+            url = f"https://www.kcu.ac/2009/mycampus/student/lecture/Plan/lectureplan.asp?termCode={code[0]}&courseCode={code[1]}"
+            await login_page.goto(url, wait_until="domcontentloaded")
+            await asyncio.sleep(3)
+            await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
+            await asyncio.sleep(3)
+
     for url in lecture_url:
         user_id, semester_info, subject_info, subject_code = extract_info(url)
         print("URL:", url)
         print("학기 정보:", semester_info)
         print("과목 정보:", subject_info)
         print("과목 코드:", subject_code)
+
         if user_id and semester_info and semester_info and subject_code:
-            db = DbUtil()
             query = f"""
                         INSERT INTO LECTURE_INFO (
                             user_id, 
@@ -109,24 +139,7 @@ async def authorization(context, login_props: LoginProps) -> Authorization:
                         )
             """
             db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code))
-
-        print()
-    """
-    
-    qm_elements = await login_page.query_selector_all('img[src="/MyClass/student/sukang/images/qm.gif"]')
-    for element in qm_elements:
-        # 각 qm.gif 이미지를 포함하는 <a> 요소의 부모의 부모인 <a> 요소의 자바스크립트를 실행하여 팝업을 엽니다.
-        await element.evaluate_handle('e => e.closest("a").click()')
-        await asyncio.sleep(5)
-        # 팝업이 열릴 때까지 대기합니다.
-        await login_page.goto("https://www.kcu.ac/2009/mycampus/student/lecture/leture_main.asp", wait_until="domcontentloaded")
-
-        # 팝업 창의 내용을 가져옵니다.
-        popup_content = await login_page.content()
-        print("Popup content:", popup_content)
-        "https://www.kcu.ac/2009/mycampus/student/lecture/Plan/lectureplan.asp?termCode=20241&courseCode=XE402201"
-        await asyncio.sleep(300)
-    """
+    return results
 
 
 def extract_info(url):
