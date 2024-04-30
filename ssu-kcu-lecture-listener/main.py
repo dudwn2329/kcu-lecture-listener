@@ -17,16 +17,6 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
-
-def on_submit():
-    global playList
-    playList = [lecture for lecture, chk in zip(lectures, checkboxes) if chk.var.get() == 1]
-    print("선택된 강의")
-    printSelected = lambda i: [print(lecture.title) for lecture in i]
-    printSelected(playList)
-    root.destroy()
-
-
 # Tkinter 윈도우 초기화
 root = tk.Tk()
 root.title("재생할 강의 선택")
@@ -36,51 +26,64 @@ root.iconify()
 # 체크박스 및 변수 초기화
 checkboxes = []
 lectures = []
-playList = []
 
 
-async def play(context, component):
+async def play(context, lecture_url):
     page = await context.new_page()
 
-    await page.goto(component.viewer_url, wait_until="domcontentloaded")
-    await page.click('.vc-front-screen-play-btn', timeout=60000)
+    await page.goto(lecture_url, wait_until="domcontentloaded")
 
-    async def mute():
+    while True:
+        await asyncio.sleep(3)
+        main = page.frame("mainFrame")
         try:
-            await page.wait_for_selector('.vc-pctrl-volume-btn', timeout=7000)
-            await page.click('.vc-pctrl-volume-btn')
-            print("Mute button clicked successfully")
+            await main.click('.intro_enter_btn', timeout=7000)
         except PlaywrightError:
-            print("Mute button did not appear, continuing without clicking...")
+            print("Enter button did not appear, continuing without clicking...")
 
-    async def confirm_actions():
+        await asyncio.sleep(1)
+        player = page.frame("playerframe")
+
+        await asyncio.sleep(1)
+
         try:
-            await page.wait_for_selector('.confirm-ok-btn', timeout=7000)
-            await page.click('.confirm-ok-btn')
-            print("Confirm button clicked successfully")
+            await player.wait_for_selector('.btn_common.btn_play', timeout=7000)
+            await player.click('.btn_common.btn_play')
         except PlaywrightError:
-            print("Confirm button did not appear, continuing without clicking...")
+            print("Play button did not appear, continuing without clicking...")
 
-    async def change_playback_rate():
-        try:
-            await page.wait_for_selector('.vc-pctrl-playback-rate-toggle-btn', timeout=10000)
-            await page.click('.vc-pctrl-playback-rate-toggle-btn')
-            await page.wait_for_selector('#vc-pctrl-playback-rate-15', timeout=10000)
-            await page.click('#vc-pctrl-playback-rate-15')
-            print("Playback rate changed successfully")
-        except PlaywrightError:
-            print("Playback rate button did not appear, continuing without clicking...")
+        async def mute():
+            try:
+                await player.wait_for_selector('.btn_mute', timeout=7000)
+                await player.click('.btn_mute')
+                print("Mute button clicked successfully")
+            except PlaywrightError:
+                print("Mute button did not appear, continuing without clicking...")
 
-    # 비동기로 실행되도록 수정
-    await asyncio.gather(
-        mute(),
-        confirm_actions(),
-        change_playback_rate()
-    )
+        async def change_playback_rate():
+            try:
+                await player.wait_for_selector('.btn_speed20', timeout=10000)
+                await player.click('.btn_speed20')
+                print("Playback rate changed successfully")
+            except PlaywrightError:
+                print("Playback rate button did not appear, continuing without clicking...")
 
-    duration = component.item_content_data['duration'] - component.attendance_data['progress']
-    duration *= 0.67
-    await asyncio.sleep(duration)  # use asyncio.sleep for async function
+        # 비동기로 실행되도록 수정
+        await asyncio.gather(
+            mute(),
+            change_playback_rate()
+        )
+        await player.wait_for_selector('.currentbar[style*="width: 100%"]', timeout=300000)
+
+        total = await main.wait_for_selector("#totalPage")
+        total = await total.text_content()
+        current = await main.wait_for_selector("#currentPage")
+        current = await current.text_content()
+        if current != total:
+            await main.click("#nextBtn")
+        elif current == total:
+            break
+
     await page.close()
     await asyncio.sleep(1)
 
@@ -110,8 +113,11 @@ async def bootstrap():
 
             print("⏳ 로그인 중입니다 ...")
 
-            me = await authorization(context, LoginProps(_id, password))
-            print(me)
+            playList = await authorization(context, LoginProps(_id, password))
+            print(playList)
+            for lecture_url in playList:
+                await play(context, lecture_url)
+
             print("⏳ 강의 정보를 불러오는 중입니다 ...")
 
             print("\n✋ 다음에 또 봐요!")
