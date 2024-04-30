@@ -1,7 +1,7 @@
 # kcu-lecture-listener
 
 ```
-git clone https://github.com/dudwn2329/ssu-lms-lecture-listener.git
+git clone https://github.com/dudwn2329/kcu-lecture-listener.git
 cd ssu-kcu-lecture-listener   
 pip install -r requirements.txt
 playwright install
