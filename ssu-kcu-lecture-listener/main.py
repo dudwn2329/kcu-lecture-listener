@@ -46,15 +46,19 @@ async def play(context, lecture_url):
 
         await asyncio.sleep(1)
 
+        #재생
         try:
-            await player.wait_for_selector('.btn_common.btn_play', timeout=7000)
+            await player.wait_for_selector('.btn_common.btn_play', timeout=3000)
+            await asyncio.sleep(1)
             await player.click('.btn_common.btn_play')
         except PlaywrightError:
             print("Play button did not appear, continuing without clicking...")
 
+
         async def mute():
             try:
                 await player.wait_for_selector('.btn_mute', timeout=7000)
+                await asyncio.sleep(1)
                 await player.click('.btn_mute')
                 print("Mute button clicked successfully")
             except PlaywrightError:
@@ -63,17 +67,20 @@ async def play(context, lecture_url):
         async def change_playback_rate():
             try:
                 await player.wait_for_selector('.btn_speed20', timeout=10000)
+                await asyncio.sleep(1)
                 await player.click('.btn_speed20')
                 print("Playback rate changed successfully")
             except PlaywrightError:
                 print("Playback rate button did not appear, continuing without clicking...")
 
+        await player.wait_for_selector('.control_text_status:has-text("재생 중")')
         # 비동기로 실행되도록 수정
         await asyncio.gather(
             mute(),
             change_playback_rate()
         )
-        await player.wait_for_selector('.currentbar[style*="width: 100%"]', timeout=300000)
+        #최대 3시간
+        await player.wait_for_selector('.currentbar[style*="width: 100%"]', timeout=10800000)
 
         total = await main.wait_for_selector("#totalPage")
         total = await total.text_content()
