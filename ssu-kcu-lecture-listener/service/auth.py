@@ -139,6 +139,8 @@ async def authorization(context, login_props: LoginProps):
                         )
             """
             db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code))
+    if db:
+        db.close()
     return results
 
 
