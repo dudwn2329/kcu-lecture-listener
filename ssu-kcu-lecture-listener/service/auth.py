@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 from http.cookies import SimpleCookie
 import re
 import asyncio
-from dbUtil import DbUtil
+from service.dbUtil import DbUtil
 
 lecture_url = []
 
@@ -49,6 +49,7 @@ async def authorization(context, login_props: LoginProps):
                     newLink.href = '/login/login.asp?loginType=05';
                     document.body.appendChild(newLink);
                 }''')
+    print("⏳ 강의 정보를 불러오는 중입니다 ...")
     await login_page.click('a[href="/login/login.asp?loginType=05"]')
     await login_page.wait_for_url("https://www.kcu.ac/login/login.asp?loginType=05", wait_until="domcontentloaded")
 
@@ -100,7 +101,7 @@ async def authorization(context, login_props: LoginProps):
                 SELECT TERM, SUBJECT_INFO,SUBJECT_CODE, USER_ID 
                 FROM LECTURE_INFO
                 WHERE 
-                    TERM = ? AND SUBJECT_CODE = ?
+                    TERM = ? AND SUBJECT_CODE = ? AND USER_ID = {login_props.id}
             """
         rows = db.getRows(query, code)
         if rows:
@@ -139,6 +140,7 @@ async def authorization(context, login_props: LoginProps):
                         )
             """
             db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code))
+        print("과목 정보를 저장했습니다. 다시 실행해주세요.")
     if db:
         db.close()
     return results

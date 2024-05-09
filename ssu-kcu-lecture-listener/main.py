@@ -17,16 +17,6 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
-# Tkinter 윈도우 초기화
-root = tk.Tk()
-root.title("재생할 강의 선택")
-root.wm_attributes("-topmost", 1)
-root.iconify()
-
-# 체크박스 및 변수 초기화
-checkboxes = []
-lectures = []
-
 
 async def play(context, lecture_url):
     page = await context.new_page()
@@ -110,7 +100,7 @@ async def bootstrap():
     async with async_playwright() as p:
         browser = await p.firefox.launch(
             # True로 설정 시 창 표시 안함
-            headless=False
+            headless=True
 
         )
         context = await browser.new_context(
@@ -124,17 +114,20 @@ async def bootstrap():
             if not (_id and password):
                 print("📝 로그인 정보를 입력하세요.")
 
-                _id = pyautogui.prompt('lms 아이디(학번) 입력')
+                _id = pyautogui.prompt('숭싸대 아이디(학번) 입력')
                 password = pyautogui.password('비밀번호')
 
             print("⏳ 로그인 중입니다 ...")
 
             playList = await authorization(context, LoginProps(_id, password))
-            print(playList)
+            if playList:
+                print(playList)
+            else:
+                print("들어야 할 강의가 없습니다.")
             for lecture_url in playList:
                 await play(context, lecture_url)
 
-            print("⏳ 강의 정보를 불러오는 중입니다 ...")
+
 
             print("\n✋ 다음에 또 봐요!")
 
@@ -143,6 +136,7 @@ async def bootstrap():
         finally:
             await context.close()
             await browser.close()
+            input()
 
 
 if __name__ == "__main__":
