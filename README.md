@@ -16,5 +16,3 @@ playwright install
 ```
 
 .env_example -> .env로 바꾸고 변수 값 수정하기
-
-![image](https://github.com/dudwn2329/kcu-lecture-listener/assets/50041010/1210df29-ff5a-4d7d-8085-97a963aeb8b1)
