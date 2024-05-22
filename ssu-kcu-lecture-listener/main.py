@@ -18,9 +18,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 
-async def play(context, lecture_url):
+async def play(context, lecture):
     page = await context.new_page()
-
+    lecture_url = lecture[0]
+    title = lecture[1]
     await page.goto(lecture_url, wait_until="domcontentloaded")
 
     while True:
@@ -30,7 +31,7 @@ async def play(context, lecture_url):
             try:
                 await main.click('.intro_enter_btn', timeout=7000)
             except PlaywrightError:
-                print("Enter button did not appear, continuing without clicking...")
+                pass
 
             await asyncio.sleep(1)
             player = page.frame("playerframe")
@@ -44,14 +45,14 @@ async def play(context, lecture_url):
                     await asyncio.sleep(1)
                     await player.click('.btn_common.btn_play')
                 except PlaywrightError:
-                    print("Play button did not appear, continuing without clicking...")
+                    print("자동재생 되었습니다.")
 
             async def mute():
                 try:
                     await player.wait_for_selector('.btn_mute', timeout=7000)
                     await asyncio.sleep(1)
                     await player.click('.btn_mute')
-                    print("Mute button clicked successfully")
+                    print("음소거 완료")
                 except PlaywrightError:
                     print("Mute button did not appear, continuing without clicking...")
 
@@ -60,7 +61,7 @@ async def play(context, lecture_url):
                     await player.wait_for_selector('.btn_speed18', timeout=10000)
                     await asyncio.sleep(1)
                     await player.click('.btn_speed18')
-                    print("Playback rate changed successfully")
+                    print("재생속도 1.8배 완료")
                 except PlaywrightError:
                     print("Playback rate button did not appear, continuing without clicking...")
 
@@ -71,9 +72,22 @@ async def play(context, lecture_url):
                 mute(),
                 change_playback_rate()
             )
-            # 최대 3시간
-            await player.wait_for_selector('.currentbar[style*="width: 100%"]', timeout=10800000)
-
+            current = await main.wait_for_selector("#currentPage")
+            current = await current.text_content()
+            print("")
+            print("")
+            while True:
+                playback_rate = await player.evaluate('''() => {
+                                const bar = document.querySelector('.currentbar');
+                                return parseFloat(bar.style.width);
+                            }''')
+                print("", end="")
+                print(f"\r{title} - {current}장 수강 중: {playback_rate}%", end="")
+                await asyncio.sleep(1)  # 1초마다 체크
+                if playback_rate >= 100:
+                    break  # 재생이 100% 완료되었으면 반복 종료
+            print("")
+            print("")
             try:
                 total = await main.wait_for_selector("#totalPage")
                 total = await total.text_content()
@@ -88,7 +102,7 @@ async def play(context, lecture_url):
                 print("next안뜸")
 
         except:
-            page.close()
+            await page.close()
 
     await page.close()
     await asyncio.sleep(1)
@@ -120,14 +134,11 @@ async def bootstrap():
             print("⏳ 로그인 중입니다 ...")
 
             playList = await authorization(context, LoginProps(_id, password))
-            if playList:
-                print(playList)
-            else:
+            if not playList:
                 print("들어야 할 강의가 없습니다.")
-            for lecture_url in playList:
-                await play(context, lecture_url)
-
-
+            for lecture in playList:
+                if lecture:
+                    await play(context, lecture)
 
             print("\n✋ 다음에 또 봐요!")
 
@@ -147,7 +158,8 @@ if __name__ == "__main__":
                         user_id TEXT,
                         term TEXT,
                         subject_info TEXT,
-                        subject_code TEXT
+                        subject_code TEXT,
+                        subject_title TEXT
                     )''')
     db.close()
     asyncio.run(bootstrap())

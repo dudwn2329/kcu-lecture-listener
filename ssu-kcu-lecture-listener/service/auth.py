@@ -69,6 +69,7 @@ async def authorization(context, login_props: LoginProps):
         asyncio.ensure_future(callback(page))
 
     unattended_weeks = defaultdict(list)
+    subject_titles = {}
     code_set = set()
     qm_elements = await login_page.query_selector_all('img[src="/MyClass/student/sukang/images/qm.gif"]')
     for element in qm_elements:
@@ -76,29 +77,36 @@ async def authorization(context, login_props: LoginProps):
         href = await element.evaluate('(e) => e.closest("a").getAttribute("href")')
 
         # 주차 정보를 포함하는 상위 요소로 이동
-        column_index = await element.evaluate('''el => {
-                        const cell = el.closest("td");
-                        const row = cell.parentElement;
-                        return Array.from(row.children).indexOf(cell) - 1;
-                    }''')
+        column_index_and_caption = await element.evaluate('''el => {
+            const cell = el.closest("td");
+            const row = cell.parentElement;
+            const tbody = row.parentElement;
+            const subject_title = row.firstElementChild.innerText;
+            const columnIndex = Array.from(row.children).indexOf(cell) - 1;
+            return { columnIndex, subject_title };
+        }''')
+        column_index = column_index_and_caption['columnIndex']
+        subject_title = column_index_and_caption['subject_title']
 
+        title = subject_title.split('강의실입장')[0].strip()
         # href 속성에서 termCode와 courseCode를 추출합니다.
         termCode = href.split('termCode=')[1].split('&')[0]
         courseCode = href.split('courseCode=')[1].split('&')[0]
 
+        print("과목명:", title)
         print("termCode:", termCode)
         print("courseCode:", courseCode)
-
+        subject_titles[courseCode] = title
         unattended_weeks[courseCode].append(column_index)
         code_set.add((termCode, courseCode))
     code_list = list(code_set)
-    print("과목코드와 미수강 주차")
+    print("과목 미수강 주차")
     print(unattended_weeks)
     print("Unique termCode and courseCode pairs:", code_list)
 
     for code in code_list:
         query = f"""
-                SELECT TERM, SUBJECT_INFO,SUBJECT_CODE, USER_ID 
+                SELECT TERM, SUBJECT_INFO,SUBJECT_CODE, USER_ID, SUBJECT_TITLE
                 FROM LECTURE_INFO
                 WHERE 
                     TERM = ? AND SUBJECT_CODE = ? AND USER_ID = {login_props.id}
@@ -108,7 +116,7 @@ async def authorization(context, login_props: LoginProps):
             for row in rows:
                 for week in unattended_weeks[row[2]]:
                     attend_url = f'https://vod.kcu.or.kr/KcuLod/{row[0]}/{row[1]}/{row[2]}/{week}/index.html?userid={row[3]}'
-                    results.append(attend_url)
+                    results.append((attend_url, row[4]))
                     print(attend_url)
         else:
             context.on("page", handle_new_page)
@@ -117,6 +125,7 @@ async def authorization(context, login_props: LoginProps):
             await asyncio.sleep(3)
             await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
             await asyncio.sleep(3)
+
 
     for url in lecture_url:
         user_id, semester_info, subject_info, subject_code = extract_info(url)
@@ -131,16 +140,20 @@ async def authorization(context, login_props: LoginProps):
                             user_id, 
                             term, 
                             subject_info, 
-                            subject_code
+                            subject_code,
+                            subject_title
                         ) VALUES (
                             ?, 
                             ?, 
                             ?, 
+                            ?,
                             ?
                         )
             """
-            db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code))
+            db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code, subject_titles[subject_code]))
+        results.append(False)
         print("과목 정보를 저장했습니다. 다시 실행해주세요.")
+
     if db:
         db.close()
     return results
