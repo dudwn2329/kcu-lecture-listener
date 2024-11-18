@@ -5,8 +5,15 @@ from http.cookies import SimpleCookie
 import re
 import asyncio
 from service.dbUtil import DbUtil
+import threading
 
-lecture_url = []
+stop_flag = False
+
+def wait_for_input():
+    global stop_flag
+    input("수강 도중에 프로그램을 종료하려면 Enter를 누르세요.\n")
+    stop_flag = True
+
 
 
 class LoginProps:
@@ -24,150 +31,300 @@ class Authorization:
 
 
 async def authorization(context, login_props: LoginProps):
-    global lecture_url
-    db = DbUtil()
     login_page = await context.new_page()
-    results = []
-    await login_page.goto("https://www.kcu.ac/portal/default.asp", wait_until="domcontentloaded")
-    # 로그인이동
-    await login_page.evaluate('''() => {
-                const newLink = document.createElement('a');
-                const span = document.createElement('span');
-                span.innerText = '로그인';
-                newLink.appendChild(span);
-                newLink.href = '/login/login.asp?loginType=01';
-                document.body.appendChild(newLink);
-            }''')
-    await login_page.click('a[href="/login/login.asp?loginType=01"]')
-    await login_page.wait_for_url("https://www.kcu.ac/login/login.asp?loginType=01", wait_until="domcontentloaded")
-    # 학번 로그인이동
-    await login_page.evaluate('''() => {
-                    const newLink = document.createElement('a');
-                    const span = document.createElement('span');
-                    span.innerText = '로그인';
-                    newLink.appendChild(span);
-                    newLink.href = '/login/login.asp?loginType=05';
-                    document.body.appendChild(newLink);
-                }''')
-    print("⏳ 강의 정보를 불러오는 중입니다 ...")
-    await login_page.click('a[href="/login/login.asp?loginType=05"]')
-    await login_page.wait_for_url("https://www.kcu.ac/login/login.asp?loginType=05", wait_until="domcontentloaded")
+    await login_page.goto("https://portal.kcu.ac/html/main/ssoko.html", wait_until="load")
+    await asyncio.sleep(1)
+    # 로그인 화면에도 팝업이 있더라
+    try:
+        is_popup_displayed = await login_page.evaluate("window.getComputedStyle(document.querySelector('#idxPop')).display")
+        if is_popup_displayed != "none":
+            await login_page.click("#idxPop #close")
+    except:
+        pass
+    await login_page.locator("#userId").wait_for(state="visible", timeout=10000)
+    await login_page.fill("#userId", login_props.id)
+    await login_page.fill("#userPw", login_props.password)
+    await asyncio.sleep(1)
+    await login_page.click("#loginBtnUserId")
+    # 메인화면으로 이동이 되지 않으면 로그인 실패로 간주
+    try:
+        await login_page.wait_for_url("https://portal.kcu.ac/html/main/index.html?portalPage=portal_main", wait_until="domcontentloaded", timeout=5000)
+    except:
+        print('로그인 실패, 아이디와 비밀번호를 확인해주세요.')
+        return
 
-    await login_page.fill("#UserID", login_props.id)
-    await login_page.fill("#Password", login_props.password)
-    await login_page.click(".login_btn_type01")
-    await login_page.wait_for_url("https://www.kcu.ac/2009/mycampus/student/index.asp?", wait_until="domcontentloaded")
 
-    def handle_new_page(page):
-        global lecture_url
-
-        async def callback(page):
-            new_url = page.url
-            if "KcuLod" in new_url:
-                lecture_url.append(new_url)
-
-        asyncio.ensure_future(callback(page))
-
-    unattended_weeks = defaultdict(list)
     subject_titles = {}
-    code_set = set()
-    qm_elements = await login_page.query_selector_all('img[src="/MyClass/student/sukang/images/qm.gif"]')
-    for element in qm_elements:
-        # 각 요소의 부모인 <a> 요소의 href 속성을 가져옵니다.
-        href = await element.evaluate('(e) => e.closest("a").getAttribute("href")')
-
-        # 주차 정보를 포함하는 상위 요소로 이동
-        column_index_and_caption = await element.evaluate('''el => {
-            const cell = el.closest("td");
-            const row = cell.parentElement;
-            const tbody = row.parentElement;
-            const subject_title = row.firstElementChild.innerText;
-            const columnIndex = Array.from(row.children).indexOf(cell) - 1;
-            return { columnIndex, subject_title };
-        }''')
-        column_index = column_index_and_caption['columnIndex']
-        subject_title = column_index_and_caption['subject_title']
-
-        title = subject_title.split('강의실입장')[0].strip()
-        # href 속성에서 termCode와 courseCode를 추출합니다.
-        termCode = href.split('termCode=')[1].split('&')[0]
-        courseCode = href.split('courseCode=')[1].split('&')[0]
-
-        print("과목명:", title)
-        print("termCode:", termCode)
-        print("courseCode:", courseCode)
-        subject_titles[courseCode] = title
-        unattended_weeks[courseCode].append(column_index)
-        code_set.add((termCode, courseCode))
-    code_list = list(code_set)
-    print("과목 미수강 주차")
-    print(unattended_weeks)
-    print("Unique termCode and courseCode pairs:", code_list)
-
-    for code in code_list:
-        query = f"""
-                SELECT TERM, SUBJECT_INFO,SUBJECT_CODE, USER_ID, SUBJECT_TITLE
-                FROM LECTURE_INFO
-                WHERE 
-                    TERM = ? AND SUBJECT_CODE = ? AND USER_ID = {login_props.id}
-            """
-        rows = db.getRows(query, code)
-        if rows:
-            for row in rows:
-                for week in unattended_weeks[row[2]]:
-                    attend_url = f'https://vod.kcu.or.kr/KcuLod/{row[0]}/{row[1]}/{row[2]}/{week}/index.html?userid={row[3]}'
-                    results.append((attend_url, row[4]))
-                    print(attend_url)
-        else:
-            context.on("page", handle_new_page)
-            url = f"https://www.kcu.ac/2009/mycampus/student/lecture/Plan/lectureplan.asp?termCode={code[0]}&courseCode={code[1]}"
-            await login_page.goto(url, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
-            await login_page.click('a.btn-lec-play-stu:has-text("수강하기")')
-            await asyncio.sleep(3)
+    print('로그인 성공!')
+    await asyncio.sleep(1)
 
 
-    for url in lecture_url:
-        user_id, semester_info, subject_info, subject_code = extract_info(url)
-        print("URL:", url)
-        print("학기 정보:", semester_info)
-        print("과목 정보:", subject_info)
-        print("과목 코드:", subject_code)
+    # 팝업이 나올 경우 닫음
+    try:
+        is_popup_displayed = await login_page.evaluate("window.getComputedStyle(document.querySelector('#idxPop')).display")
+        if is_popup_displayed != "none":
+            await login_page.click("#idxPop #close")
+            pass
+        await asyncio.sleep(1)
+    except:
+        pass
 
-        if user_id and semester_info and semester_info and subject_code:
-            query = f"""
-                        INSERT INTO LECTURE_INFO (
-                            user_id, 
-                            term, 
-                            subject_info, 
-                            subject_code,
-                            subject_title
-                        ) VALUES (
-                            ?, 
-                            ?, 
-                            ?, 
-                            ?,
-                            ?
+    # 강의실 입장
+    # 버튼이 안눌릴 때가 가끔 있음
+    lectroom_btn = await login_page.wait_for_selector('.subject-name .btn-round-orange[tabindex="0"]')
+    await lectroom_btn.hover()
+    await lectroom_btn.click(delay=100)
+    print('강의실 입장 중...')
+    try:
+        await login_page.wait_for_url("https://lms.kcu.ac/atnlcSubj/lectRoom", wait_until="load")
+    except Exception as e:
+        print('강의실 입장 중 에러 발생')
+        print(e)
+
+    # 필요한 정보 가져오기
+    info = await login_page.evaluate('''
+            () => {
+                return {
+                  shyr : $('#shyr').val(),
+                  smstCd : $('#smstCd').val(),
+                  coseCd : $('#coseCd').val(),
+                  weekNo : $('#weekNo').val(),
+                  empno : $('#profId').val(),
+                  userAgent : userAgent(),
+                  lectRmPrcsCd : lectRmPrcsCd,
+                  userAuth : userAuth
+               }
+            } 
+        ''')
+    #print(info)
+
+    # 각 수강과목 별로 프로세스 진행
+    lnb = await login_page.query_selector_all(".subjLnb>a")
+    # 입력 감지를 위한 쓰레드 시작
+    input_thread = threading.Thread(target=wait_for_input)
+    input_thread.start()
+    for i in range(len(lnb)):
+        if stop_flag:
+            break
+        lnb = await login_page.query_selector_all(".subjLnb>a")
+        el = lnb[i]
+    #for el in lnb:
+        course_cd = await el.get_attribute("data-cose-cd")
+        #print(course_cd)
+        title = await el.text_content()
+        await el.click()
+        await asyncio.sleep(3)
+
+        info['coseCd'] = course_cd
+
+        # 과목 정보 화면으로 이동
+        await studyList(login_page, info=info)
+
+        await login_page.wait_for_url("https://lms.kcu.ac/atnlcSubj/atnlcApe/list", wait_until="load")
+
+
+        print(f"{title} 수업 정보 읽는 중...")
+        # 미수강 주차와 강의번호를 가져옴
+        lectInfoList = await login_page.evaluate("""
+            const elements = document.querySelectorAll('.btnLect');
+            const dataAttributes = [];
+            
+            elements.forEach(element => {
+                if (element.textContent.trim() === '이어보기' || element.textContent.trim() === '학습하기') {
+                    const parentTr = element.closest('tr');
+                    if (parentTr) {
+                        dataAttributes.push({
+                            weekNo: parentTr.getAttribute('data-week-no'),
+                            lectNo: parentTr.getAttribute('data-lect-no')
+                        });
+                    }
+                }
+            });
+            
+            dataAttributes;
+        """)
+        print(lectInfoList)
+        for item in lectInfoList:
+            if stop_flag:
+                break
+
+            info['lectNo'] = item['lectNo']
+            info['weekNo'] = item['weekNo']
+            try:
+                await lectRoom(login_page, info=info)
+                await login_page.wait_for_url("https://lms.kcu.ac/atnlcSubj/lectRoom", wait_until="load")
+                await login_page.wait_for_load_state("networkidle")
+                # 로딩이 제대로 인식 안되는것 같아서 3초대기 박아버림
+                await asyncio.sleep(3)
+
+                frame = login_page.frame(name='cndIfram')
+                if frame:
+                    async def play():
+                        await frame.evaluate('document.querySelector("video").play()')
+
+                    async def mute():
+                        await frame.evaluate('document.querySelector("video").muted = true')
+
+                    async def change_playback_rate():
+                        await frame.evaluate('document.querySelector("video").playbackRate = 2.0')
+
+                    async def pause():
+                        await frame.evaluate('document.querySelector("video").pause()')
+                        await asyncio.sleep(2)
+
+                    await asyncio.sleep(3)
+                    print(f"{title} {info['weekNo']}주차 재생 중")
+                    try:
+                        await asyncio.gather(
+                            play(),
+                            mute(),
+                            change_playback_rate()
                         )
-            """
-            db.exec(query=query, params=(user_id, semester_info, subject_info, subject_code, subject_titles[subject_code]))
-        results.append(False)
-        print("과목 정보를 저장했습니다. 다시 실행해주세요.")
+                        # accTime은 실제 수강시간을 뜻함(초 단위)
+                        accTime = await frame.evaluate('getParameter("AccTime")')
+                        await frame.evaluate('''
+                                (accTime) => {
+                                    document.querySelector("video").currentTime = accTime
+                                }
+                            ''', accTime)
 
-    if db:
-        db.close()
-    return results
+                        remaining_time = await frame.evaluate('''
+                                () => {
+                                    const video = document.querySelector("video");
+                                    return (video.duration - video.currentTime);
+                                }
+                            ''')
+
+                        # 비디오 완료 대기 및 루프 종료 확인
+                        while True:
+                            if stop_flag:
+                                await pause()
+                                print("사용자 입력을 감지했습니다. 프로그램을 종료합니다.")
+                                break
+
+                            playback_rate = await frame.evaluate('''
+                                () => {
+                                    const video = document.querySelector("video");
+                                    return (video.currentTime / video.duration) * 100;
+                                }
+                            ''')
+                            print(f"\r{playback_rate:.2f}%", end="")
+
+                            await asyncio.sleep(1)  # 1초마다 체크
+                            if playback_rate >= 100:
+                                break  # 재생이 100% 완료되었으면 반복 종료
+
+                        print("\n\n재생 완료")
+                    except Exception as e:
+                        print("재생 중 오류 발생:", e)
+                        await pause()
+
+                else:
+                    print("프레임을 찾을 수 없습니다.")
+            except Exception as e:
+                print("수업 처리 중 오류 발생:", e)
+                #await frame.wait_for_event("videoEnded", timeout=video_duration)
 
 
-def extract_info(url):
-    # URL에서 학기 정보, 과목 정보, 과목 코드, user_id를 추출합니다.
-    pattern = r'KcuLod/(\d+)/(\d+)/([A-Z0-9]+)/.*?userid=(\d+)'
-    match = re.search(pattern, url)
-    if match:
-        semester_info = match.group(1)
-        subject_info = match.group(2)
-        subject_code = match.group(3)
-        user_id = match.group(4)
-        return user_id, semester_info, subject_info, subject_code
-    else:
-        return None, None, None, None
+
+async def studyList(page, info):
+    await page.wait_for_load_state('load')
+    await page.evaluate('''
+            (info)=> {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/atnlcSubj/atnlcApe/list';
+
+                const shyr = document.createElement('input');
+                shyr.type = 'text';
+                shyr.name = 'shyr';
+                shyr.value = info.shyr;
+
+                const smstCd = document.createElement('input');
+                smstCd.type = 'text';
+                smstCd.name = 'smstCd';
+                smstCd.value = info.smstCd;
+
+                const coseCd = document.createElement('input');
+                coseCd.type = 'text';
+                coseCd.name = 'coseCd';
+                coseCd.value = info.coseCd;
+
+                const subjType = document.createElement('input');
+                subjType.type = 'text';
+                subjType.name = 'subjType';
+                subjType.value = 'atnlcSubj';
+
+                form.appendChild(shyr);
+                form.appendChild(smstCd);
+                form.appendChild(coseCd);
+                form.appendChild(subjType);
+
+                document.body.appendChild(form);
+                form.submit();
+            }
+            ''', info)
+
+async def lectRoom(page, info):
+    await page.wait_for_load_state('load')
+    await page.evaluate('''
+                (info)=> {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '/atnlcSubj/lectRoom';
+
+                    const shyr = document.createElement('input');
+                    shyr.type = 'text';
+                    shyr.name = 'shyr';
+                    shyr.value = info.shyr;
+
+                    const smstCd = document.createElement('input');
+                    smstCd.type = 'text';
+                    smstCd.name = 'smstCd';
+                    smstCd.value = info.smstCd;
+
+                    const coseCd = document.createElement('input');
+                    coseCd.type = 'text';
+                    coseCd.name = 'coseCd';
+                    coseCd.value = info.coseCd;
+
+                    const weekNo = document.createElement('input');
+                    weekNo.type = 'text';
+                    weekNo.name = 'weekNo';
+                    weekNo.value = info.weekNo;
+                    
+                    const lectNo = document.createElement('input');
+                    lectNo.type = 'text';
+                    lectNo.name = 'lectNo';
+                    lectNo.value = info.lectNo;
+                    
+                    const menuCd = document.createElement('input');
+                    menuCd.type = 'text';
+                    menuCd.name = 'menuCd';
+                    menuCd.value = '04580'; 
+                    
+                    const currSub = document.createElement('input');
+                    currSub.type = 'text';
+                    currSub.name = 'currSub';
+                    currSub.value = '04580';
+                    
+                    const prgmId = document.createElement('input');
+                    prgmId.type = 'text';
+                    prgmId.name = 'prgmId';
+                    prgmId.value = 'LRN_LM_S_014';
+
+                    form.appendChild(shyr);
+                    form.appendChild(smstCd);
+                    form.appendChild(coseCd);
+                    form.appendChild(weekNo);
+                    form.appendChild(lectNo);
+                    form.appendChild(menuCd);
+                    form.appendChild(currSub);
+                    form.appendChild(prgmId);
+
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+                ''', info)
+
+
