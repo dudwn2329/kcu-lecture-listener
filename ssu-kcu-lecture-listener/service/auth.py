@@ -32,7 +32,7 @@ class Authorization:
 
 async def authorization(context, login_props: LoginProps):
     login_page = await context.new_page()
-    await login_page.goto("https://portal.kcu.ac/html/main/ssoko.html", wait_until="load")
+    await login_page.goto("https://portal.kcu.ac/html/main/ssoko.html", wait_until="load", timeout=30000)
     await asyncio.sleep(1)
     # 로그인 화면에도 팝업이 있더라
     try:
